@@ -1,0 +1,214 @@
+# PURPOSE: Cluster Enzyme Engineering data through k-means clustering algorithm
+    # This algorith clusters similar data points together
+    # Each cluster has a "Centroid", or the central point of that cluster
+
+
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+import sklearn.cluster as cluster
+
+
+# ===================================== Define Inputs =====================================
+
+# Inputs: Clustering Parameters
+inNumberOfClusters = 3 # Number of clusters
+inCentroidSeeds = 100 # Number of times the algorithm runs with different centroid seeds
+
+# Input: Enzyme Information
+inEnzymeName = 'MMP7'
+inEnzymeSequence = 'MRLTVLCAVCLLPGSLALPLPQEAGGMSELQWEQAQDYLKRFYLYDSETKNANSLEAKLKEMQKFFGLPITGMLNSRVIEIMQKPRCGVPDVAEYSLFPNSPKWTSKVVTYRIVSYTRDLPHITVDRLVSKALNMWGKEIPLHFRKVVWGTADIMIGFARGAHGDSYPFDGPGNTLAHAFAPGTGLGGDAHFDEDERWTDGSSLGINFLYAATHELGHSLGMGHSSDPNAVMYPTYGNGDPQNFKLSQDDIKGIQKLYGKRSNSRKK'
+inSubstrate = 'PAPELLGGP' # Engineer for enzymatic interaction
+inCounterSelection = 'RPLALWRS' # Engineer for minimal interaction
+
+# Input: Specific Variants
+inVariants = ['Y177', 'A77', 'Y179', 'V266', 'D68', 'H166', 'E14', 'A256', 'M99', 'T212',
+              'V65', 'W81', 'S198', 'Y21', 'W170', 'D120', 'E128', 'L133', 'M10', 'F166',
+              'G159', 'S261', 'G105']
+
+# Input: Specific Activity Scores
+inSubstrateActivityScores = [342, 212, 431, 40, 32, 300, 88, 0.1, 29, 44,
+                             300, 4, 0.2, 44, 5, 20, 40, 5, 80, 342,
+                             0.05, 210, 30]
+inCSActivityScores = [0.4, 0.2, 320, 10, 77, 0.05, 453, 0.09, 37, 10,
+                      0.1, 0.2, 0.14, 120, 10, 0.1, 0.06, 8, 0.1, 0.1,
+                      0.3, 0.3, 2]
+
+# Input: Random Variants
+inGenRandomVariants = 0 # Set = 1, to generate enzyme variants
+inNumberVariants = 50 # Define number of variants to test
+inMaxActivityScore = 100
+inMinActivityScore = 0.001
+
+# Inputs: General
+inPlotClustering = 1 # Set = 1 to plot the clustering data
+inPrintAAProperties = 0
+inComponents = 2 # Define number of PC
+inXMaxSpacer = 20 # Define upper bound for x-axis
+inXMinSpacer = -20 # Define upper bound for x-axis
+inYLimSpacer = 10 # Adjust yLim upper and lower bounds
+
+
+# Residue Information
+AA = ['A', 'R', 'N', 'D', 'C', 'E', 'Q', 'G', 'H', 'I', 'L', 'K', 'M', 'F', 'P', 'S',
+      'T', 'W', 'Y', 'V']
+AAProperties = [
+    [89.10, 174.20, 132.12, 133.11, 121.16, 147.13, 146.15, 75.07, 155.16, 131.18, 131.18,
+     146.19, 149.21, 165.19, 115.13, 105.09, 119.12, 204.23, 181.19, 117.15],  # MW
+    [0, 3, 6, 2, 5, 2, 6, 0, 3, 0, 0, 3, 5, 1, 0, 4, 4, 1, 1, 0],  # Residue type
+    [1, 6, 3, 3, 2, 4, 4, 0, 4, 3, 3, 5, 4, 5, 2, 2, 2, 7, 6, 2],  # FG length
+    [0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 6, 5, 0, 0, 9, 6, 0],  # Atoms in a ring
+    [0, 1, 0, -1, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],  # Charge
+    [0, 4, 3, 3, 0, 3, 3, 0, 5, 0, 0, 0, 0, 6, 0, 0, 0, 9, 6, 0]  # Number of sp2 atoms
+]
+
+
+# =================================== Define Functions ===================================
+
+def randomVariants():
+    variants = []
+    selectivity = []
+    maxRN = len(AA) - 1
+    enzymeLength = len(inEnzymeSequence) - 1
+
+    # Generate variants
+    for z in range(inNumberVariants):
+        # Select residue for substitution
+        idxAA = random.randint(1, maxRN)
+        residue = AA[idxAA]
+        position = random.randint(1, enzymeLength)
+
+        # Check: Ensure That You Have Selected A New Residue
+        if residue != inEnzymeSequence[position]:
+            variants.append(residue + str(position))
+            selectivity.append(random.uniform(inMinActivityScore, inMaxActivityScore))
+    return variants, selectivity
+
+
+# Generate random variants
+if inGenRandomVariants == 1:
+    variants, selectivity = randomVariants()
+
+    print('')
+    print('Variants:')
+    print(variants)
+    variantCount = len(variants)
+    print(f'Number of Variants: {variantCount}')
+    print('')
+else:
+    variants = inVariants
+
+
+def evaluateVariantProperties(selectivity):
+    spacer = 3 # Add columns for additional data
+
+    variantProperties = np.array([[None for _ in range(len(variants))] for _ in range(len(AAProperties) + spacer)])
+    print('Variant Properties Array Size:')
+    print(f'     Rows: {len(variantProperties)}')
+    print(f'     Columns: {len(variantProperties[0])}')
+    print('')
+
+    for z in range(len(variants)):
+        # Select residue & record its position
+        residue = variants[z][0]  # Extract substitutes residue
+        position = variants[z][1:]  # Extract substitution position
+        idx = AA.index(residue) # Define index of selected residue
+
+        # Use index to extract features associated with selected residue
+        variantProperties[0][z] = residue
+        variantProperties[1][z] = position
+        variantProperties[2][z] = AAProperties[0][idx]  # MW
+        variantProperties[3][z] = AAProperties[1][idx]  # Residue type
+        variantProperties[4][z] = AAProperties[2][idx]  # FG length
+        variantProperties[5][z] = AAProperties[3][idx]  # Atoms in a ring
+        variantProperties[6][z] = AAProperties[4][idx]  # Charge
+        variantProperties[7][z] = AAProperties[5][idx]  # sp2
+        variantProperties[8][z] = selectivity[z] # Selectivity scores
+
+        if inPrintAAProperties == 1:
+            for idx in range(20):
+                print(f'AA: {AA[idx]}')
+                print(f'MW: {AAProperties[2][idx]}')
+                print(f'Residue Type: {AAProperties[3][idx]}')
+                print(f'FG Length: {AAProperties[4][idx]}')
+                print(f'# Atoms in Ring: {AAProperties[5][idx]}')
+                print(f'AA Charge: {AAProperties[6][idx]}')
+                print(f'# sp2 atoms: {AAProperties[7][idx]}')
+                if spacer > 2:
+                    print(f'Selectivity: {AAProperties[8][idx]}')
+                print('')
+
+    return variantProperties
+
+
+def divideActivityScores(substrate, cs):
+    selectivity = []
+
+    for subActivity, CSActivity in zip(substrate, cs):
+        selectivity.append(subActivity / CSActivity)
+
+    return selectivity
+
+
+# ================================= Evaluate The Variants =================================
+
+# Evaluate the selectivity of your variants
+if inGenRandomVariants != 1:
+    selectivity = divideActivityScores(inSubstrateActivityScores, inCSActivityScores)
+print('Combined Scores:')
+print(selectivity)
+print('')
+
+# Evaluate variants
+variantProperties = evaluateVariantProperties(selectivity)
+print('Variant Properties:')
+print(variantProperties.T)
+print('')
+
+# Extract features
+features = np.array(variantProperties[1:7], dtype=float).T  # Exclude residue strings
+
+
+# =================================== k-Means Clustering ===================================
+
+kmFit = cluster.KMeans(n_clusters=inNumberOfClusters, n_init=inCentroidSeeds).fit(features)
+kmPredictions = kmFit.predict(features)
+
+# Sort the variants based on selectivity scores
+sortedVariants = [v for _, v in sorted(zip(selectivity, variants), reverse=True)]
+sortedSelectivity = sorted(selectivity, reverse=True)
+
+
+# Print the selectivity score for each variant
+print('Ranked Selectivity Scores:')
+for variant, diff in zip(sortedVariants, sortedSelectivity):
+    print(f'{variant}: {diff}')
+
+if inPlotClustering == 1:
+    selectivityInt = [int(x) for x in selectivity]
+    # Visualize clustering results
+    plt.figure(figsize=(8, 6))
+
+    # Iterate over each data point
+    for feature, selectivity, pred, variantString in \
+            zip(features, selectivity, kmPredictions, variantProperties[0]):
+        # Define corresponding cluster color
+        clusterColor = plt.cm.viridis(pred / inNumberOfClusters)  # Scale the color based on the cluster number
+
+        # Plot the data point as a marker without filling
+        plt.scatter(feature[0], selectivity, marker='None')
+
+        # Annotate the variant string at the data point with the corresponding cluster color
+        plt.annotate(variantString, (feature[0], selectivity), fontsize=16,
+                     color=clusterColor, ha='center', va='center')
+
+    plt.xlabel('Substitution Position', fontsize=14)
+    plt.ylabel('Selectivity Score (Substrate Activity / CS Activity)', fontsize=14)
+    plt.title(f'k-Means Clustering: {inEnzymeName} Variants', fontsize=16,
+              fontweight='bold')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.xlim(0 + inXMinSpacer, len(inEnzymeSequence) + inXMaxSpacer)
+    plt.ylim(-(round(max(selectivityInt)) / inYLimSpacer),
+             (round(max(selectivityInt)) + (round(max(selectivityInt)) / inYLimSpacer)))
+    plt.show()
